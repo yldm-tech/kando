@@ -302,7 +302,8 @@ func (t ChatTranslator) translateTexts(ctx context.Context, endpoint Endpoint, t
 				if leftErr != nil {
 					return nil, leftErr
 				}
-				right, rightErr := t.translateTexts(ctx, endpoint, texts[mid:], language, earlier, progress)
+				rightEarlier := append(append([]string(nil), earlier...), texts[:mid]...)
+				right, rightErr := t.translateTexts(ctx, endpoint, texts[mid:], language, rightEarlier, progress)
 				if rightErr != nil {
 					return nil, rightErr
 				}
