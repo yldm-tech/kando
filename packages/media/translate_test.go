@@ -469,6 +469,34 @@ func TestChatTranslatorResendsAMalformedBatch(t *testing.T) {
 	}
 }
 
+// A nearly complete large reply is split into smaller requests after retries,
+// so a single omitted line does not fail the whole film.
+func TestChatTranslatorSplitsANearlyCompleteBatch(t *testing.T) {
+	srv, seen := fakeChat(t, func(lines []string) string {
+		if len(lines) == 8 {
+			return upper(lines[:7])
+		}
+		return upper(lines)
+	})
+	segments := make([]core.Segment, 8)
+	for i := range segments {
+		segments[i] = core.Segment{Text: fmt.Sprintf("line %d", i)}
+	}
+	tr := ChatTranslator{BaseURL: srv.URL + "/v1", APIKey: "secret", Model: "m"}
+	got, err := tr.Translate(context.Background(), segments, "English")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*seen) != maxBatchSends+2 || len(got) != len(segments) {
+		t.Fatalf("requests = %d, segments = %d", len(*seen), len(got))
+	}
+	for i, s := range got {
+		if s.Text != fmt.Sprintf("LINE %d", i) {
+			t.Fatalf("segment %d = %#v", i, s)
+		}
+	}
+}
+
 // A batch that still fails after it was sent again stays untranslated, the rest of the film is translated, and the error says how many lines were left.
 func TestChatTranslatorLeavesAFailedBatchUntranslated(t *testing.T) {
 	var calls int

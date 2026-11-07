@@ -288,10 +288,36 @@ func (t ChatTranslator) translateTexts(ctx context.Context, endpoint Endpoint, t
 			return nil, err
 		}
 		lines, err := replyLines(reply, len(texts))
-		if err == nil || send == maxBatchSends || ctx.Err() != nil {
+		if err == nil {
+			return lines, nil
+		}
+		if send == maxBatchSends || ctx.Err() != nil {
+			// Models occasionally omit only a few lines from a large response.
+			// Retry those responses as smaller batches so one malformed reply does
+			// not discard an otherwise usable translation.
+			var countErr *lineCountError
+			if errors.As(err, &countErr) && recoverableLineCount(countErr.got, countErr.want) {
+				mid := len(texts) / 2
+				left, leftErr := t.translateTexts(ctx, endpoint, texts[:mid], language, earlier, progress)
+				if leftErr != nil {
+					return nil, leftErr
+				}
+				right, rightErr := t.translateTexts(ctx, endpoint, texts[mid:], language, earlier, progress)
+				if rightErr != nil {
+					return nil, rightErr
+				}
+				return append(left, right...), nil
+			}
 			return lines, err
 		}
 	}
+}
+
+// recoverableLineCount identifies a nearly complete response worth retrying as
+// smaller requests. A one-line reply for a two-line batch is usually an
+// instruction failure, and splitting it would duplicate an unknown translation.
+func recoverableLineCount(got, want int) bool {
+	return want > 2 && got > 1 && got*2 >= want
 }
 
 // replyLines reads the n translated lines of a batch from the model's reply: a JSON array of n strings, maybe in a code fence. An element that is an array of strings, as a model writes for a half sentence split across two lines, is that line's translation in parts, which are joined.
@@ -304,7 +330,7 @@ func replyLines(reply chatResponse, n int) ([]string, error) {
 		return nil, fmt.Errorf("translation is not a JSON array of strings: %w", err)
 	}
 	if len(raw) != n {
-		return nil, fmt.Errorf("translation returned %d lines for %d", len(raw), n)
+		return nil, &lineCountError{got: len(raw), want: n}
 	}
 	lines := make([]string, n)
 	for i, element := range raw {
@@ -318,6 +344,14 @@ func replyLines(reply chatResponse, n int) ([]string, error) {
 		lines[i] = joinParts(parts)
 	}
 	return lines, nil
+}
+
+type lineCountError struct {
+	got, want int
+}
+
+func (e *lineCountError) Error() string {
+	return fmt.Sprintf("translation returned %d lines for %d", e.got, e.want)
 }
 
 // joinParts joins the parts of one translated line: with nothing between Chinese or Japanese text, which writes no spaces, and with a space between words otherwise.
