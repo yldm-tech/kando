@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -328,7 +329,7 @@ func (t Tools) Transcribe(ctx context.Context, videoPath string) ([]core.Segment
 			reportProgress(ctx, core.Fraction(f))
 		}
 	}
-	if _, _, err := runFollowing(ctx, true, follow, t.Whisper, "-m", t.WhisperModel, "-l", "auto", "-np", "-pp", "-oj", "-of", transcript, "-f", audio); err != nil {
+	if _, _, err := runFollowing(ctx, true, follow, t.Whisper, "-m", t.WhisperModel, "-t", strconv.Itoa(whisperThreadCount()), "-l", "auto", "-np", "-pp", "-oj", "-of", transcript, "-f", audio); err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(transcript + ".json")
@@ -336,6 +337,20 @@ func (t Tools) Transcribe(ctx context.Context, videoPath string) ([]core.Segment
 		return nil, err
 	}
 	return parseWhisperJSON(data)
+}
+
+// whisperThreadCount uses the available CPU without letting a large machine
+// create more decoder contention than whisper.cpp can use effectively. Four is
+// whisper-cli's default, but it leaves most modern Macs idle during decoding.
+func whisperThreadCount() int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		return 1
+	}
+	if n > 8 {
+		return 8
+	}
+	return n
 }
 
 func (t Tools) Translate(ctx context.Context, segments []core.Segment, language string) ([]core.Segment, error) {

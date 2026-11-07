@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -159,6 +160,19 @@ func TestToolsTranscribeRejectsEmptyVideoPath(t *testing.T) {
 	_, err := Tools{FFmpeg: "binary-that-does-not-exist", Whisper: "binary-that-does-not-exist"}.Transcribe(context.Background(), " ")
 	if err == nil || !strings.Contains(err.Error(), "video path is empty") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWhisperThreadCountUsesAvailableCPU(t *testing.T) {
+	want := runtime.NumCPU()
+	if want < 1 {
+		want = 1
+	}
+	if want > 8 {
+		want = 8
+	}
+	if got := whisperThreadCount(); got != want {
+		t.Fatalf("threads = %d, want %d", got, want)
 	}
 }
 
